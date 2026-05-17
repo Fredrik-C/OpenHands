@@ -16,6 +16,7 @@ from openhands.app_server.settings.file_settings_store import FileSettingsStore
 from openhands.app_server.settings.settings_models import Settings
 from openhands.app_server.settings.settings_store import SettingsStore
 from openhands.app_server.user_auth.user_auth import UserAuth
+from openhands.app_server.workflow.workflow_models import WorkflowSettings
 from openhands.sdk.llm import LLM
 from openhands.sdk.settings import (
     ConversationSettings,
@@ -317,6 +318,34 @@ async def test_disabled_skills_persistence(test_client):
     assert response.status_code == 200
     data = response.json()
     assert data['disabled_skills'] == ['skill_c']
+
+
+@pytest.mark.asyncio
+async def test_workflow_settings_persistence(test_client):
+    response = test_client.post(
+        '/api/v1/settings',
+        json={
+            'workflow_settings': WorkflowSettings(
+                enabled=True,
+                plan_model='anthropic/claude-sonnet-4-5-20250929',
+                implement_model='openai/gpt-5-2025-08-07',
+                review_model='openai/o4-mini',
+                strict_enforcement=True,
+                max_review_iterations=3,
+            ).model_dump(mode='json')
+        },
+    )
+    assert response.status_code == 200
+
+    response = test_client.get('/api/v1/settings')
+    assert response.status_code == 200
+    workflow_settings = response.json()['workflow_settings']
+    assert workflow_settings['enabled'] is True
+    assert workflow_settings['plan_model'] == 'anthropic/claude-sonnet-4-5-20250929'
+    assert workflow_settings['implement_model'] == 'openai/gpt-5-2025-08-07'
+    assert workflow_settings['review_model'] == 'openai/o4-mini'
+    assert workflow_settings['strict_enforcement'] is True
+    assert workflow_settings['max_review_iterations'] == 3
 
     response = test_client.post(
         '/api/v1/settings',

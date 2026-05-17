@@ -118,6 +118,9 @@ export function ConversationWebSocketProvider({
   >(null);
 
   const { setPlanContent } = useConversationStore();
+  const conversationMode = useConversationStore(
+    (state) => state.conversationMode,
+  );
 
   // Hook for reading conversation file
   const { mutate: readConversationFile } = useReadConversationFile();
@@ -196,26 +199,48 @@ export function ConversationWebSocketProvider({
     return buildWebSocketUrl(conversationId, conversationUrl);
   }, [conversationId, conversationUrl]);
 
-  const planningAgentWsUrl = useMemo(() => {
+  const planningAgentConversation = useMemo(() => {
     if (!subConversations?.length) {
       return null;
     }
-
-    // Currently, there is only one sub-conversation and it uses the planning agent.
-    const planningAgentConversation = subConversations[0];
-
-    if (
-      !planningAgentConversation?.id ||
-      !planningAgentConversation.conversation_url
-    ) {
-      return null;
-    }
-
-    return buildWebSocketUrl(
-      planningAgentConversation.id,
-      planningAgentConversation.conversation_url,
+    return (
+      subConversations.find(
+        (subConversation) => subConversation.tags?.workflow_phase === "plan",
+      ) ?? subConversations[0]
     );
   }, [subConversations]);
+
+  const reviewAgentConversation = useMemo(() => {
+    if (!subConversations?.length) {
+      return null;
+    }
+    const reviewSubConversations = subConversations.filter(
+      (subConversation) => subConversation.tags?.workflow_phase === "review",
+    );
+    if (!reviewSubConversations.length) {
+      return null;
+    }
+    return reviewSubConversations.sort((a, b) =>
+      (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+    )[0];
+  }, [subConversations]);
+
+  const activeSubConversation = useMemo(() => {
+    if (conversationMode === "review") {
+      return reviewAgentConversation;
+    }
+    return planningAgentConversation;
+  }, [conversationMode, planningAgentConversation, reviewAgentConversation]);
+
+  const planningAgentWsUrl = useMemo(() => {
+    if (!activeSubConversation?.id || !activeSubConversation.conversation_url) {
+      return null;
+    }
+    return buildWebSocketUrl(
+      activeSubConversation.id,
+      activeSubConversation.conversation_url,
+    );
+  }, [activeSubConversation]);
 
   // Merged connection state - reflects combined status of both connections
   const connectionState = useMemo<V1_WebSocketConnectionState>(() => {
@@ -315,7 +340,7 @@ export function ConversationWebSocketProvider({
     receivedEventCountRefPlanning.current = 0;
     // Reset the tracked event ref when sub-conversations change
     latestPlanningFileEventRef.current = null;
-  }, [subConversationIds]);
+  }, [subConversationIds, planningAgentWsUrl]);
 
   // Merged loading history state - true if either connection is still loading
   const isLoadingHistory = useMemo(
@@ -589,9 +614,8 @@ export function ConversationWebSocketProvider({
 
           // Handle cache invalidation for ActionEvent
           if (isActionEvent(event)) {
-            const planningAgentConversation = subConversations?.[0];
             const currentConversationId =
-              planningAgentConversation?.id || "test-conversation-id"; // TODO: Get from context
+              activeSubConversation?.id || "test-conversation-id"; // TODO: Get from context
             handleActionEventCacheInvalidation(
               event,
               currentConversationId,
@@ -632,7 +656,6 @@ export function ConversationWebSocketProvider({
           if (isPlanningFileEditorObservationEvent(event)) {
             const { path } = event.observation;
             if (isPlanFilePath(path)) {
-              const planningAgentConversation = subConversations?.[0];
               const planningConversationId = planningAgentConversation?.id;
 
               if (planningConversationId && path) {
@@ -678,7 +701,8 @@ export function ConversationWebSocketProvider({
       removeErrorMessage,
       removeOptimisticUserMessage,
       queryClient,
-      subConversations,
+      activeSubConversation,
+      planningAgentConversation,
       conversationId,
       setExecutionStatus,
       appendInput,
@@ -762,7 +786,7 @@ export function ConversationWebSocketProvider({
       queryParams.session_api_key = sessionApiKey;
     }
 
-    const planningAgentConversation = subConversations?.[0];
+    const activePhaseConversation = activeSubConversation;
 
     return {
       queryParams,
@@ -774,14 +798,14 @@ export function ConversationWebSocketProvider({
 
         // Fetch expected event count for history loading detection
         if (
-          planningAgentConversation?.id &&
-          planningAgentConversation.conversation_url
+          activePhaseConversation?.id &&
+          activePhaseConversation.conversation_url
         ) {
           try {
             const count = await EventService.getEventCount(
-              planningAgentConversation.id,
-              planningAgentConversation.conversation_url,
-              planningAgentConversation.session_api_key,
+              activePhaseConversation.id,
+              activePhaseConversation.conversation_url,
+              activePhaseConversation.session_api_key,
             );
             setExpectedEventCountPlanning(count);
 
@@ -814,7 +838,7 @@ export function ConversationWebSocketProvider({
     setErrorMessage,
     removeErrorMessage,
     sessionApiKey,
-    subConversations,
+    activeSubConversation,
   ]);
 
   // Only attempt WebSocket connection when we have a valid URL
@@ -836,7 +860,9 @@ export function ConversationWebSocketProvider({
     async (message: V1SendMessageRequest): Promise<SendMessageResult> => {
       const currentMode = useConversationStore.getState().conversationMode;
       const currentSocket =
-        currentMode === "plan" ? planningAgentSocket : mainSocket;
+        currentMode === "plan" || currentMode === "review"
+          ? planningAgentSocket
+          : mainSocket;
 
       if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
         // WebSocket not connected - queue message via REST API

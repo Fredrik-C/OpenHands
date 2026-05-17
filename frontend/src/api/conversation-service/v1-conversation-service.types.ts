@@ -4,7 +4,7 @@ import {
   ConversationTrigger,
 } from "../open-hands.types";
 import { V1SandboxStatus } from "../sandbox-service/sandbox-service.types";
-import { Provider } from "#/types/settings";
+import { Provider, WorkflowPhase } from "#/types/settings";
 import { SuggestedTask } from "#/utils/types";
 import { V1ExecutionStatus } from "#/types/v1/core";
 
@@ -67,6 +67,8 @@ export interface V1AppConversationStartRequest {
   pr_number?: number[];
   parent_conversation_id?: string | null;
   agent_type?: "default" | "plan";
+  workflow_phase?: WorkflowPhase | null;
+  workflow_iteration?: number | null;
   plugins?: PluginSpec[] | null; // Plugins to load when starting the conversation
 }
 

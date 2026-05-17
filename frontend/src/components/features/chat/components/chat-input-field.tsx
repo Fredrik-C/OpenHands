@@ -30,6 +30,13 @@ export function ChatInputField({
   );
 
   const isPlanMode = conversationMode === "plan";
+  const isReviewMode = conversationMode === "review";
+  let placeholder = t(I18nKey.SUGGESTIONS$WHAT_TO_BUILD);
+  if (isPlanMode) {
+    placeholder = t(I18nKey.COMMON$LET_S_WORK_ON_A_PLAN);
+  } else if (isReviewMode) {
+    placeholder = "Review implementation and report findings";
+  }
 
   return (
     <div
@@ -44,11 +51,7 @@ export function ChatInputField({
             disabled && "cursor-not-allowed opacity-50",
           )}
           contentEditable={!disabled}
-          data-placeholder={
-            isPlanMode
-              ? t(I18nKey.COMMON$LET_S_WORK_ON_A_PLAN)
-              : t(I18nKey.SUGGESTIONS$WHAT_TO_BUILD)
-          }
+          data-placeholder={placeholder}
           data-testid="chat-input"
           onInput={onInput}
           onPaste={onPaste}

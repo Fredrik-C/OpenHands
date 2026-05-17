@@ -1,87 +1,86 @@
-import { useCallback, useEffect } from "react";
-import { useTranslation } from "react-i18next";
-import { I18nKey } from "#/i18n/declaration";
+import { useCallback, useEffect, useMemo } from "react";
 import { useConversationStore } from "#/stores/conversation-store";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
 import { useCreateConversation } from "#/hooks/mutation/use-create-conversation";
 import { useSubConversations } from "#/hooks/query/use-sub-conversations";
-import { displaySuccessToast } from "#/utils/custom-toast-handlers";
+import { useSettings } from "#/hooks/query/use-settings";
+import {
+  displayErrorToast,
+  displaySuccessToast,
+} from "#/utils/custom-toast-handlers";
 import {
   getConversationState,
   setConversationState,
 } from "#/utils/conversation-local-storage";
 
-/**
- * Custom hook that encapsulates the logic for handling plan creation.
- * Returns a function that can be called to create a plan conversation and
- * the pending state of the conversation creation.
- *
- * @returns An object containing handlePlanClick function and isCreatingConversation boolean
- */
-export const useHandlePlanClick = () => {
-  const { t } = useTranslation();
+const WORKFLOW_REVIEW_PHASE = "review";
+
+export const useHandleReviewClick = () => {
   const {
     setConversationMode,
     setSubConversationTaskId,
     subConversationTaskId,
   } = useConversationStore();
   const { data: conversation } = useActiveConversation();
+  const { data: settings } = useSettings();
   const { data: subConversations } = useSubConversations(
     conversation?.sub_conversation_ids ?? [],
   );
   const { mutate: createConversation, isPending: isCreatingConversation } =
     useCreateConversation();
 
-  // Restore subConversationTaskId from localStorage on conversation load
-  // This handles the case where page was refreshed while sub-conversation creation was in progress
   useEffect(() => {
     if (!conversation?.id) return;
-
     const storedState = getConversationState(conversation.id);
     if (storedState.subConversationTaskId && !subConversationTaskId) {
       setSubConversationTaskId(storedState.subConversationTaskId);
     }
   }, [conversation?.id, subConversationTaskId, setSubConversationTaskId]);
 
-  const planConversationExists = (subConversations ?? []).some(
-    (subConversation) =>
-      subConversation?.tags?.workflow_phase === "plan" ||
-      subConversation?.tags?.workflow_phase === undefined,
+  const reviewIterationsUsed = useMemo(
+    () =>
+      (subConversations ?? []).filter(
+        (subConversation) =>
+          subConversation?.tags?.workflow_phase === WORKFLOW_REVIEW_PHASE,
+      ).length,
+    [subConversations],
   );
 
-  const handlePlanClick = useCallback(
+  const maxReviewIterations =
+    settings?.workflow_settings?.max_review_iterations ?? 3;
+
+  const handleReviewClick = useCallback(
     (event?: React.MouseEvent<HTMLButtonElement> | KeyboardEvent) => {
       event?.preventDefault();
       event?.stopPropagation();
+      setConversationMode("review");
 
-      // Set conversation mode to "plan" immediately
-      setConversationMode("plan");
-
-      // Reuse existing planning sub-conversation when available.
-      if (
-        planConversationExists ||
-        !conversation?.id ||
-        subConversationTaskId
-      ) {
+      if (!conversation?.id || subConversationTaskId) {
         return;
       }
 
-      // Create a new sub-conversation if we have a current conversation ID
+      const nextIteration = reviewIterationsUsed + 1;
+      if (nextIteration > maxReviewIterations) {
+        displayErrorToast(
+          `Review loop limit reached (${maxReviewIterations} iterations).`,
+        );
+        return;
+      }
+
       createConversation(
         {
           parentConversationId: conversation.id,
-          agentType: "plan",
-          workflowPhase: "plan",
+          agentType: "default",
+          workflowPhase: "review",
+          workflowIteration: nextIteration,
         },
         {
           onSuccess: (data) => {
             displaySuccessToast(
-              t(I18nKey.PLANNING_AGENTT$PLANNING_AGENT_INITIALIZED),
+              `Review iteration ${nextIteration} initialized.`,
             );
-            // Track the task ID to poll for sub-conversation creation
             if (data.v1_task_id) {
               setSubConversationTaskId(data.v1_task_id);
-              // Persist to localStorage so it survives page refresh
               setConversationState(conversation.id, {
                 subConversationTaskId: data.v1_task_id,
               });
@@ -91,15 +90,15 @@ export const useHandlePlanClick = () => {
       );
     },
     [
-      conversation,
-      createConversation,
       setConversationMode,
-      setSubConversationTaskId,
+      conversation?.id,
       subConversationTaskId,
-      planConversationExists,
-      t,
+      reviewIterationsUsed,
+      maxReviewIterations,
+      createConversation,
+      setSubConversationTaskId,
     ],
   );
 
-  return { handlePlanClick, isCreatingConversation };
+  return { handleReviewClick, isCreatingConversation };
 };

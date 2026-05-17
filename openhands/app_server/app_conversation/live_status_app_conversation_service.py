@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 import zipfile
 from collections import defaultdict
@@ -51,6 +52,8 @@ from openhands.app_server.app_conversation.app_conversation_start_task_service i
 )
 from openhands.app_server.app_conversation.hook_loader import (
     load_hooks_from_agent_server,
+    load_hooks_from_file,
+    merge_hook_configs,
 )
 from openhands.app_server.app_conversation.sql_app_conversation_info_service import (
     SQLAppConversationInfoService,
@@ -93,6 +96,13 @@ from openhands.app_server.utils.llm_metadata import (
     get_llm_metadata,
     should_set_litellm_extra_body,
 )
+from openhands.app_server.workflow.workflow_models import (
+    DEFAULT_CONTEXTKING_PROTOCOL_FILE,
+    DEFAULT_REVIEW_PROMPT,
+    WorkflowPhase,
+    WorkflowSettings,
+    load_contextking_protocol_file,
+)
 from openhands.sdk import Agent, AgentContext, LocalWorkspace
 from openhands.sdk.hooks import HookConfig
 from openhands.sdk.llm import LLM
@@ -118,6 +128,8 @@ from openhands.tools.preset.planning import (
 
 _conversation_info_type_adapter = TypeAdapter(list[ConversationInfo | None])
 _logger = logging.getLogger(__name__)
+_WORKFLOW_HOOKS_FILE_ENV = 'OH_WORKFLOW_HOOKS_FILE'
+_WORKFLOW_CK_PROTOCOL_FILE_ENV = 'OH_WORKFLOW_CK_PROTOCOL_FILE'
 
 
 # Planning agent instruction to prevent "Ready to proceed?" behavior
@@ -244,6 +256,8 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         # Create and yield the start task
         user_id = await self.user_context.get_user_id()
 
+        llm_model_is_explicit = request.llm_model is not None
+
         # Validate and inherit from parent conversation if provided
         if request.parent_conversation_id:
             parent_info = (
@@ -258,6 +272,10 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             self._inherit_configuration_from_parent(request, parent_info)
 
         self._apply_suggested_task(request)
+        request.workflow_phase = self._resolve_workflow_phase(
+            request.workflow_phase,
+            request.agent_type,
+        )
 
         task = AppConversationStartTask(
             created_by_user_id=user_id,
@@ -313,6 +331,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                     working_dir,
                     request.agent_type,
                     request.llm_model,
+                    request.workflow_phase,
+                    request.workflow_iteration,
+                    llm_model_is_explicit,
                     remote_workspace=remote_workspace,
                     selected_repository=request.selected_repository,
                     plugins=request.plugins,
@@ -348,6 +369,10 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             # the same agent back through the AgentBase discriminator.
             request_agent = start_conversation_request.agent
             tags: dict[str, str] = {}
+            if request.workflow_phase:
+                tags['workflow_phase'] = request.workflow_phase.value
+            if request.workflow_iteration is not None:
+                tags['workflow_iteration'] = str(request.workflow_iteration)
             if request_agent.agent_kind == 'acp':
                 llm_model = None
                 agent_kind = 'acp'
@@ -824,6 +849,92 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         if not request.git_provider:
             request.git_provider = suggested_task.git_provider
 
+    def _get_workflow_settings(self, user: UserInfo) -> WorkflowSettings:
+        workflow_settings = getattr(user, 'workflow_settings', None)
+        if isinstance(workflow_settings, WorkflowSettings):
+            return workflow_settings
+        if isinstance(workflow_settings, dict):
+            return WorkflowSettings.model_validate(workflow_settings)
+        return WorkflowSettings()
+
+    def _resolve_workflow_phase(
+        self,
+        requested_phase: WorkflowPhase | None,
+        agent_type: AgentType,
+    ) -> WorkflowPhase:
+        if requested_phase is not None:
+            return requested_phase
+        if agent_type == AgentType.PLAN:
+            return WorkflowPhase.PLAN
+        return WorkflowPhase.IMPLEMENT
+
+    def _resolve_phase_model(
+        self,
+        workflow_settings: WorkflowSettings,
+        workflow_phase: WorkflowPhase,
+    ) -> str | None:
+        if workflow_phase == WorkflowPhase.PLAN:
+            return workflow_settings.plan_model
+        if workflow_phase == WorkflowPhase.REVIEW:
+            return workflow_settings.review_model
+        return workflow_settings.implement_model
+
+    def _resolve_effective_llm_model(
+        self,
+        user: UserInfo,
+        requested_llm_model: str | None,
+        workflow_phase: WorkflowPhase,
+        llm_model_is_explicit: bool,
+    ) -> str | None:
+        if llm_model_is_explicit:
+            return requested_llm_model
+
+        workflow_settings = self._get_workflow_settings(user)
+        if workflow_settings.enabled:
+            phase_model = self._resolve_phase_model(workflow_settings, workflow_phase)
+            if phase_model:
+                return phase_model
+        return requested_llm_model
+
+    def _validate_context_king_or_raise(
+        self,
+        workflow_settings: WorkflowSettings,
+    ) -> None:
+        if not workflow_settings.enabled or not workflow_settings.strict_enforcement:
+            return
+        if not workflow_settings.require_context_king:
+            return
+        if shutil.which('ck') is not None:
+            return
+        raise ValueError(
+            'Workflow strict enforcement is enabled and ContextKing (ck) is '
+            'required, but `ck` is not available on PATH.'
+        )
+
+    def _load_contextking_protocol_for_workflow(
+        self, workflow_settings: WorkflowSettings
+    ) -> str | None:
+        protocol_file = os.getenv(
+            _WORKFLOW_CK_PROTOCOL_FILE_ENV, DEFAULT_CONTEXTKING_PROTOCOL_FILE
+        )
+        protocol = load_contextking_protocol_file(protocol_file)
+        if protocol:
+            return protocol
+
+        if workflow_settings.strict_enforcement:
+            _logger.warning(
+                'Strict workflow mode active: ContextKing protocol file %s is '
+                'missing, unreadable, or empty. Proceeding without protocol injection.',
+                protocol_file,
+            )
+        else:
+            _logger.warning(
+                'ContextKing protocol file %s is missing, unreadable, or empty. '
+                'Proceeding without protocol injection.',
+                protocol_file,
+            )
+        return None
+
     def _compute_plan_path(
         self,
         working_dir: str,
@@ -1206,6 +1317,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         working_dir: str,
         agent_type: AgentType = AgentType.DEFAULT,
         llm_model: str | None = None,
+        workflow_phase: WorkflowPhase = WorkflowPhase.IMPLEMENT,
+        workflow_iteration: int | None = None,
+        llm_model_is_explicit: bool = False,
         remote_workspace: AsyncRemoteWorkspace | None = None,
         selected_repository: str | None = None,
         plugins: list[PluginSpec] | None = None,
@@ -1230,6 +1344,9 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
             working_dir: Working directory path
             agent_type: Type of agent (DEFAULT or PLAN)
             llm_model: Optional specific LLM model to use
+            workflow_phase: Workflow phase for this conversation
+            workflow_iteration: Optional workflow iteration counter
+            llm_model_is_explicit: Whether llm_model came directly from the request
             remote_workspace: Optional remote workspace instance
             selected_repository: Optional repository name
             plugins: Optional list of plugins to load
@@ -1239,6 +1356,19 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 precedence.
         """
         user = await self.user_context.get_user_info()
+        workflow_settings = self._get_workflow_settings(user)
+        self._validate_context_king_or_raise(workflow_settings)
+
+        if (
+            workflow_settings.enabled
+            and workflow_phase == WorkflowPhase.REVIEW
+            and workflow_iteration is not None
+            and workflow_iteration > workflow_settings.max_review_iterations
+        ):
+            raise ValueError(
+                'Review iteration limit exceeded: '
+                f'{workflow_iteration} > {workflow_settings.max_review_iterations}'
+            )
 
         # Route ACP agent settings to the ACP-specific builder
         if isinstance(user.agent_settings, ACPAgentSettings):
@@ -1289,8 +1419,23 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 secrets[name] = StaticSecret(value=value)
 
         # --- LLM + MCP -----------------------------------------------------
+        resolved_llm_model = self._resolve_effective_llm_model(
+            user=user,
+            requested_llm_model=llm_model,
+            workflow_phase=workflow_phase,
+            llm_model_is_explicit=llm_model_is_explicit,
+        )
         llm, mcp_config = await self._configure_llm_and_mcp(
-            user, llm_model, conversation_id
+            user, resolved_llm_model, conversation_id
+        )
+        _logger.info(
+            'Workflow resolution for conversation %s: enabled=%s phase=%s '
+            'explicit_llm=%s resolved_llm=%s',
+            conversation_id,
+            workflow_settings.enabled,
+            workflow_phase.value,
+            llm_model_is_explicit,
+            resolved_llm_model or '',
         )
 
         # --- system_message_suffix (planning-agent prefix) ------------------
@@ -1302,6 +1447,30 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 )
             else:
                 effective_suffix = PLANNING_AGENT_INSTRUCTION
+
+        if workflow_settings.enabled:
+            ck_protocol = self._load_contextking_protocol_for_workflow(
+                workflow_settings
+            )
+            if ck_protocol:
+                if effective_suffix:
+                    effective_suffix = f'{ck_protocol}\n\n{effective_suffix}'
+                else:
+                    effective_suffix = ck_protocol
+
+        if workflow_settings.enabled and workflow_phase == WorkflowPhase.REVIEW:
+            review_prompt = workflow_settings.review_prompt or DEFAULT_REVIEW_PROMPT
+            if initial_message is None:
+                initial_message = SendMessageRequest(
+                    role='user',
+                    content=[TextContent(text=review_prompt)],
+                    run=True,
+                )
+            else:
+                if effective_suffix:
+                    effective_suffix = f'{effective_suffix}\n\n{review_prompt}'
+                else:
+                    effective_suffix = review_prompt
 
         # --- web host context -----------------------------------------------
         # Add WEB_HOST to agent context if available
@@ -1349,23 +1518,77 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
 
         # --- hooks (require remote workspace; must precede request build) -----
         hook_config: HookConfig | None = None
+        workspace_hook_config: HookConfig | None = None
+        global_hook_config: HookConfig | None = None
+        workflow_hooks_file = os.getenv(_WORKFLOW_HOOKS_FILE_ENV)
+
+        if workflow_settings.enabled and workflow_hooks_file:
+            try:
+                global_hook_config = load_hooks_from_file(workflow_hooks_file)
+                if global_hook_config:
+                    _logger.info(
+                        'Loaded global workflow hooks from %s',
+                        workflow_hooks_file,
+                    )
+                else:
+                    if (
+                        workflow_settings.enabled
+                        and workflow_settings.strict_enforcement
+                    ):
+                        _logger.warning(
+                            'Strict workflow mode active: global hooks file %s '
+                            'resolved to an empty config.',
+                            workflow_hooks_file,
+                        )
+            except Exception as exc:
+                if workflow_settings.enabled and workflow_settings.strict_enforcement:
+                    _logger.warning(
+                        'Strict workflow mode active: failed to load global '
+                        'workflow hooks from %s (%s). Proceeding without failure.',
+                        workflow_hooks_file,
+                        exc,
+                    )
+                else:
+                    _logger.warning(
+                        'Failed to load global workflow hooks from %s: %s',
+                        workflow_hooks_file,
+                        exc,
+                    )
+        elif workflow_settings.enabled and workflow_settings.strict_enforcement:
+            _logger.warning(
+                'Strict workflow mode active: %s is not set. Proceeding without '
+                'global workflow hooks.',
+                _WORKFLOW_HOOKS_FILE_ENV,
+            )
+
         if remote_workspace:
             try:
                 _logger.debug(
                     f'Attempting to load hooks from workspace: '
                     f'project_dir={project_dir}'
                 )
-                hook_config = await self._load_hooks_from_workspace(
+                workspace_hook_config = await self._load_hooks_from_workspace(
                     remote_workspace, project_dir
                 )
-                if hook_config:
+                if workspace_hook_config:
                     _logger.debug(
-                        f'Successfully loaded hooks: {sanitize_config(hook_config.model_dump())}'
+                        'Successfully loaded workspace hooks: '
+                        f'{sanitize_config(workspace_hook_config.model_dump())}'
                     )
                 else:
                     _logger.debug('No hooks found in workspace')
             except Exception as e:
                 _logger.warning(f'Failed to load hooks: {e}', exc_info=True)
+
+        hook_config = merge_hook_configs(global_hook_config, workspace_hook_config)
+        if hook_config:
+            _logger.info(
+                'Using merged hooks config (global=%s workspace=%s) for '
+                'conversation %s',
+                global_hook_config is not None,
+                workspace_hook_config is not None,
+                conversation_id,
+            )
 
         # --- plugins --------------------------------------------------------
         final_initial_message = self._construct_initial_message_with_plugin_params(

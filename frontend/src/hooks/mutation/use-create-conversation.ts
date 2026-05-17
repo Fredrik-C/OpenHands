@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import V1ConversationService from "#/api/conversation-service/v1-conversation-service.api";
 import { PluginSpec } from "#/api/conversation-service/v1-conversation-service.types";
 import { SuggestedTask } from "#/utils/types";
-import { Provider } from "#/types/settings";
+import { Provider, WorkflowPhase } from "#/types/settings";
 
 interface CreateConversationVariables {
   query?: string;
@@ -15,6 +15,8 @@ interface CreateConversationVariables {
   conversationInstructions?: string;
   parentConversationId?: string;
   agentType?: "default" | "plan";
+  workflowPhase?: WorkflowPhase;
+  workflowIteration?: number;
   plugins?: PluginSpec[];
 }
 
@@ -42,6 +44,8 @@ export const useCreateConversation = () => {
         conversationInstructions,
         parentConversationId,
         agentType,
+        workflowPhase,
+        workflowIteration,
         plugins,
       } = variables;
 
@@ -56,6 +60,8 @@ export const useCreateConversation = () => {
         undefined, // trigger - set by backend when applicable
         parentConversationId,
         agentType,
+        workflowPhase,
+        workflowIteration,
         plugins,
       );
 

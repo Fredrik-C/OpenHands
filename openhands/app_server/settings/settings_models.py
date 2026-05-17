@@ -29,6 +29,7 @@ from openhands.app_server.integrations.provider import ProviderToken
 from openhands.app_server.integrations.service_types import ProviderType
 from openhands.app_server.settings.llm_profiles import LLMProfiles
 from openhands.app_server.utils.jsonpatch_compat import deep_merge
+from openhands.app_server.workflow.workflow_models import WorkflowSettings
 from openhands.sdk.settings import (
     ACPAgentSettings,
     AgentSettingsConfig,
@@ -142,6 +143,7 @@ class Settings(BaseModel):
             'See ``LLMProfiles`` for the profile-management API.'
         ),
     )
+    workflow_settings: WorkflowSettings = Field(default_factory=WorkflowSettings)
 
     model_config = ConfigDict(populate_by_name=True)
 

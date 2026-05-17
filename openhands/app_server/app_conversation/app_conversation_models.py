@@ -20,6 +20,7 @@ from openhands.app_server.sandbox.sandbox_models import SandboxStatus
 
 # Import from new location and re-export for backward compatibility
 from openhands.app_server.settings.settings_models import SandboxGroupingStrategy
+from openhands.app_server.workflow.workflow_models import WorkflowPhase
 from openhands.sdk.conversation import ConversationExecutionStatus
 from openhands.sdk.llm import MetricsSnapshot
 from openhands.sdk.plugin import PluginSource
@@ -183,6 +184,8 @@ class AppConversationStartRequest(OpenHandsModel):
     pr_number: list[int] = Field(default_factory=list)
     parent_conversation_id: OpenHandsUUID | None = None
     agent_type: AgentType = Field(default=AgentType.DEFAULT)
+    workflow_phase: WorkflowPhase | None = None
+    workflow_iteration: int | None = Field(default=None, ge=1)
 
     public: bool | None = None
 

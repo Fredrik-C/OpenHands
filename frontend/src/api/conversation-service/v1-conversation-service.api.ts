@@ -1,7 +1,7 @@
 import axios from "axios";
 import { openHands } from "../open-hands-axios";
 import { ConversationTrigger, GetVSCodeUrlResponse } from "../open-hands.types";
-import { Provider } from "#/types/settings";
+import { Provider, WorkflowPhase } from "#/types/settings";
 import { SuggestedTask } from "#/utils/types";
 import { buildHttpBaseUrl } from "#/utils/websocket-url";
 import { buildSessionHeaders } from "#/utils/utils";
@@ -69,6 +69,8 @@ class V1ConversationService {
     trigger?: ConversationTrigger,
     parent_conversation_id?: string,
     agent_type?: "default" | "plan",
+    workflow_phase?: WorkflowPhase,
+    workflow_iteration?: number,
     plugins?: PluginSpec[],
     sandbox_id?: string,
     llm_model?: string,
@@ -82,6 +84,8 @@ class V1ConversationService {
       trigger,
       parent_conversation_id: parent_conversation_id || null,
       agent_type,
+      workflow_phase: workflow_phase || null,
+      workflow_iteration: workflow_iteration || null,
       plugins: plugins || null,
       sandbox_id: sandbox_id || null,
       llm_model: llm_model || null,

@@ -392,7 +392,7 @@ async def start_app_conversation(
                         if start_request.trigger
                         else None,
                         llm_model=None,  # Not available at start time
-                        agent_type='default',
+                        agent_type=start_request.agent_type.value,
                         has_repository=start_request.selected_repository is not None,
                     )
         except Exception:

@@ -16,6 +16,10 @@ from openhands.app_server.event_callback.event_callback_result_models import (
     EventCallbackResult,
     EventCallbackResultStatus,
 )
+from openhands.app_server.workflow.workflow_models import (
+    WorkflowPhase,
+    load_contextking_protocol_file,
+)
 from openhands.sdk import Event
 
 
@@ -98,3 +102,30 @@ def test_app_conversation_update_request_title_field_updates_conversation_info()
         'Title was not updated on AppConversationInfo. '
         "Ensure 'title' is in AppConversationUpdateRequest.model_fields_set."
     )
+
+
+def test_app_conversation_start_request_accepts_workflow_fields():
+    request = AppConversationStartRequest(
+        workflow_phase=WorkflowPhase.REVIEW,
+        workflow_iteration=2,
+    )
+
+    assert request.workflow_phase == WorkflowPhase.REVIEW
+    assert request.workflow_iteration == 2
+
+
+def test_load_contextking_protocol_file_returns_content(tmp_path):
+    protocol_file = tmp_path / 'ck-code-search-protocol.md'
+    protocol_file.write_text('# ContextKing Protocol\nUse ck find-files first.\n')
+
+    loaded = load_contextking_protocol_file(str(protocol_file))
+
+    assert loaded == '# ContextKing Protocol\nUse ck find-files first.'
+
+
+def test_load_contextking_protocol_file_returns_none_for_missing_or_empty(tmp_path):
+    assert load_contextking_protocol_file(str(tmp_path / 'missing.md')) is None
+
+    empty_file = tmp_path / 'empty.md'
+    empty_file.write_text('   \n\t')
+    assert load_contextking_protocol_file(str(empty_file)) is None

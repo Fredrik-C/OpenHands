@@ -6,6 +6,7 @@ import { I18nKey } from "#/i18n/declaration";
 import CodeTagIcon from "#/icons/code-tag.svg?react";
 import ChevronDownSmallIcon from "#/icons/chevron-down-small.svg?react";
 import LessonPlanIcon from "#/icons/lesson-plan.svg?react";
+import PrStatusIcon from "#/icons/pr-status.svg?react";
 import { useConversationStore } from "#/stores/conversation-store";
 import { ChangeAgentContextMenu } from "./change-agent-context-menu";
 import { cn } from "#/utils/utils";
@@ -15,6 +16,7 @@ import { useActiveConversation } from "#/hooks/query/use-active-conversation";
 import { useUnifiedWebSocketStatus } from "#/hooks/use-unified-websocket-status";
 import { useSubConversationTaskPolling } from "#/hooks/query/use-sub-conversation-task-polling";
 import { useHandlePlanClick } from "#/hooks/use-handle-plan-click";
+import { useHandleReviewClick } from "#/hooks/use-handle-review-click";
 
 export function ChangeAgentButton() {
   const [contextMenuOpen, setContextMenuOpen] = useState<boolean>(false);
@@ -69,8 +71,12 @@ export function ChangeAgentButton() {
     queryClient,
   ]);
 
-  // Get handlePlanClick and isCreatingConversation from custom hook
+  // Get mode action handlers from custom hooks
   const { handlePlanClick, isCreatingConversation } = useHandlePlanClick();
+  const {
+    handleReviewClick,
+    isCreatingConversation: isCreatingReviewConversation,
+  } = useHandleReviewClick();
 
   // Close context menu when agent starts running
   useEffect(() => {
@@ -80,7 +86,10 @@ export function ChangeAgentButton() {
   }, [isAgentRunning, contextMenuOpen, isWebSocketConnected]);
 
   const isButtonDisabled =
-    isAgentRunning || isCreatingConversation || !isWebSocketConnected;
+    isAgentRunning ||
+    isCreatingConversation ||
+    isCreatingReviewConversation ||
+    !isWebSocketConnected;
 
   // Handle Shift + Tab keyboard shortcut to cycle through modes
   useEffect(() => {
@@ -95,10 +104,19 @@ export function ChangeAgentButton() {
         event.preventDefault();
         event.stopPropagation();
 
-        // Cycle between modes: code -> plan -> code
-        const nextMode = conversationMode === "code" ? "plan" : "code";
+        // Cycle between modes: code -> plan -> review -> code
+        let nextMode: "code" | "plan" | "review";
+        if (conversationMode === "code") {
+          nextMode = "plan";
+        } else if (conversationMode === "plan") {
+          nextMode = "review";
+        } else {
+          nextMode = "code";
+        }
         if (nextMode === "plan") {
           handlePlanClick(event);
+        } else if (nextMode === "review") {
+          handleReviewClick(event);
         } else {
           setConversationMode(nextMode);
         }
@@ -115,6 +133,7 @@ export function ChangeAgentButton() {
     conversationMode,
     setConversationMode,
     handlePlanClick,
+    handleReviewClick,
   ]);
 
   const handleButtonClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -130,20 +149,27 @@ export function ChangeAgentButton() {
   };
 
   const isExecutionAgent = conversationMode === "code";
+  const isPlanAgent = conversationMode === "plan";
 
   const buttonLabel = useMemo(() => {
     if (isExecutionAgent) {
       return t(I18nKey.COMMON$CODE);
     }
-    return t(I18nKey.COMMON$PLAN);
-  }, [isExecutionAgent, t]);
+    if (isPlanAgent) {
+      return t(I18nKey.COMMON$PLAN);
+    }
+    return "Review";
+  }, [isExecutionAgent, isPlanAgent, t]);
 
   const buttonIcon = useMemo(() => {
     if (isExecutionAgent) {
       return <CodeTagIcon width={18} height={18} color="#737373" />;
     }
-    return <LessonPlanIcon width={18} height={18} color="#ffffff" />;
-  }, [isExecutionAgent]);
+    if (isPlanAgent) {
+      return <LessonPlanIcon width={18} height={18} color="#ffffff" />;
+    }
+    return <PrStatusIcon width={18} height={18} color="#ffffff" />;
+  }, [isExecutionAgent, isPlanAgent]);
 
   return (
     <div className="relative">
@@ -172,6 +198,7 @@ export function ChangeAgentButton() {
           onClose={() => setContextMenuOpen(false)}
           onCodeClick={handleCodeClick}
           onPlanClick={handlePlanClick}
+          onReviewClick={handleReviewClick}
         />
       )}
     </div>

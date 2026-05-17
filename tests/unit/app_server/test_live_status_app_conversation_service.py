@@ -41,6 +41,10 @@ from openhands.app_server.settings.settings_models import (
     Settings,
 )
 from openhands.app_server.user.user_context import UserContext
+from openhands.app_server.workflow.workflow_models import (
+    WorkflowPhase,
+    WorkflowSettings,
+)
 from openhands.sdk import Agent, Event
 from openhands.sdk.llm import LLM
 from openhands.sdk.secret import LookupSecret, StaticSecret
@@ -203,6 +207,62 @@ class TestLiveStatusAppConversationService:
         assert request.trigger == ConversationTrigger.SUGGESTED_TASK
         assert request.selected_repository == suggested_task.repo
         assert request.git_provider == suggested_task.git_provider
+
+    def test_resolve_workflow_phase_defaults(self):
+        assert (
+            self.service._resolve_workflow_phase(None, AgentType.PLAN)
+            == WorkflowPhase.PLAN
+        )
+        assert (
+            self.service._resolve_workflow_phase(None, AgentType.DEFAULT)
+            == WorkflowPhase.IMPLEMENT
+        )
+        assert (
+            self.service._resolve_workflow_phase(
+                WorkflowPhase.REVIEW, AgentType.DEFAULT
+            )
+            == WorkflowPhase.REVIEW
+        )
+
+    def test_resolve_effective_llm_model_prefers_phase_when_not_explicit(self):
+        self.mock_user.workflow_settings = WorkflowSettings(
+            enabled=True,
+            implement_model='openai/gpt-5-2025-08-07',
+        )
+        resolved = self.service._resolve_effective_llm_model(
+            user=self.mock_user,
+            requested_llm_model='parent-inherited-model',
+            workflow_phase=WorkflowPhase.IMPLEMENT,
+            llm_model_is_explicit=False,
+        )
+        assert resolved == 'openai/gpt-5-2025-08-07'
+
+    def test_resolve_effective_llm_model_respects_explicit_request(self):
+        self.mock_user.workflow_settings = WorkflowSettings(
+            enabled=True,
+            implement_model='openai/gpt-5-2025-08-07',
+        )
+        resolved = self.service._resolve_effective_llm_model(
+            user=self.mock_user,
+            requested_llm_model='explicit-model',
+            workflow_phase=WorkflowPhase.IMPLEMENT,
+            llm_model_is_explicit=True,
+        )
+        assert resolved == 'explicit-model'
+
+    def test_validate_context_king_raises_when_required_and_missing(self):
+        with patch(
+            'openhands.app_server.app_conversation.live_status_app_conversation_service.shutil.which',
+            return_value=None,
+        ):
+            with pytest.raises(ValueError, match='ContextKing'):
+                self.service._validate_context_king_or_raise(
+                    WorkflowSettings(
+                        enabled=True,
+                        strict_enforcement=True,
+                        require_context_king=True,
+                    )
+                )
 
     def test_apply_suggested_task_raises_if_initial_message_present(self):
         suggested_task = SuggestedTask(
@@ -929,6 +989,82 @@ class TestLiveStatusAppConversationService:
         self.service._configure_llm_and_mcp.assert_called_once_with(
             self.mock_user, 'gpt-4', test_conversation_id
         )
+
+    @patch(
+        'openhands.app_server.app_conversation.live_status_app_conversation_service.get_default_tools',
+        return_value=[],
+    )
+    @pytest.mark.asyncio
+    async def test_build_request_injects_contextking_protocol_from_file(
+        self, _mock_tools, tmp_path
+    ):
+        self.mock_user.workflow_settings = WorkflowSettings(enabled=True)
+        self.mock_user_context.get_user_info.return_value = self.mock_user
+
+        protocol_file = tmp_path / 'ck-code-search-protocol.md'
+        protocol_file.write_text(
+            '# ContextKing Protocol\nStep 0: ck get-keyword-map\nStep 1: ck find-files\n'
+        )
+
+        self.service._setup_secrets_for_git_providers = AsyncMock(return_value={})
+        real_llm = LLM(model='gpt-4', api_key=SecretStr('test-key'))
+        self.service._configure_llm_and_mcp = AsyncMock(return_value=(real_llm, {}))
+
+        with patch.dict(
+            os.environ,
+            {'OH_WORKFLOW_CK_PROTOCOL_FILE': str(protocol_file)},
+            clear=False,
+        ):
+            result = await self.service._build_start_conversation_request_for_user(
+                sandbox=self.mock_sandbox,
+                conversation_id=uuid4(),
+                initial_message=None,
+                system_message_suffix='Test suffix',
+                git_provider=None,
+                working_dir='/test/dir',
+                remote_workspace=None,
+            )
+
+        suffix = result.agent.agent_context.system_message_suffix or ''
+        assert '# ContextKing Protocol' in suffix
+        assert 'Step 0: ck get-keyword-map' in suffix
+        assert 'Step 1: ck find-files' in suffix
+        assert 'Test suffix' in suffix
+
+    @patch(
+        'openhands.app_server.app_conversation.live_status_app_conversation_service.get_default_tools',
+        return_value=[],
+    )
+    @pytest.mark.asyncio
+    async def test_build_request_skips_contextking_protocol_when_file_missing(
+        self, _mock_tools
+    ):
+        self.mock_user.workflow_settings = WorkflowSettings(enabled=True)
+        self.mock_user_context.get_user_info.return_value = self.mock_user
+
+        self.service._setup_secrets_for_git_providers = AsyncMock(return_value={})
+        real_llm = LLM(model='gpt-4', api_key=SecretStr('test-key'))
+        self.service._configure_llm_and_mcp = AsyncMock(return_value=(real_llm, {}))
+
+        with patch.dict(
+            os.environ,
+            {'OH_WORKFLOW_CK_PROTOCOL_FILE': '/path/that/does/not/exist.md'},
+            clear=False,
+        ):
+            result = await self.service._build_start_conversation_request_for_user(
+                sandbox=self.mock_sandbox,
+                conversation_id=uuid4(),
+                initial_message=None,
+                system_message_suffix='Test suffix',
+                git_provider=None,
+                working_dir='/test/dir',
+                remote_workspace=None,
+            )
+
+        suffix = result.agent.agent_context.system_message_suffix or ''
+        assert 'Test suffix' in suffix
+        assert '<CONTEXTKING_PROTOCOL>' not in suffix
+        assert '# ContextKing Protocol' not in suffix
 
     @patch(
         'openhands.app_server.app_conversation.live_status_app_conversation_service.get_registered_agent_definitions'

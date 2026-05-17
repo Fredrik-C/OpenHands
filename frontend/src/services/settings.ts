@@ -36,6 +36,16 @@ export const DEFAULT_SETTINGS: Settings = {
   git_user_email: "openhands@all-hands.dev",
   v1_enabled: true,
   sandbox_grouping_strategy: "NO_GROUPING",
+  workflow_settings: {
+    enabled: false,
+    plan_model: null,
+    implement_model: null,
+    review_model: null,
+    review_prompt: null,
+    strict_enforcement: false,
+    require_context_king: true,
+    max_review_iterations: 3,
+  },
   agent_settings_schema: null,
   agent_settings: {
     schema_version: 1,

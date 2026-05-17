@@ -110,6 +110,19 @@ export type SkillInfo = {
 
 export type SettingsScope = "personal" | "org";
 
+export type WorkflowPhase = "plan" | "implement" | "review";
+
+export type WorkflowSettings = {
+  enabled: boolean;
+  plan_model: string | null;
+  implement_model: string | null;
+  review_model: string | null;
+  review_prompt: string | null;
+  strict_enforcement: boolean;
+  require_context_king: boolean;
+  max_review_iterations: number;
+};
+
 export type Settings = {
   llm_model: string;
   llm_base_url: string;
@@ -144,4 +157,5 @@ export type Settings = {
   conversation_settings_schema?: SettingsSchema | null;
   conversation_settings?: Record<string, SettingsValue> | null;
   sandbox_grouping_strategy?: SandboxGroupingStrategy;
+  workflow_settings?: WorkflowSettings;
 };
