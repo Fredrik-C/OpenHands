@@ -11,6 +11,8 @@ ENV CK_MODEL_DIR=/root/.ck/models/bge-small-en-v1.5
 
 # Context King Linux binaries are framework-dependent apphosts, so install
 # a matching .NET runtime in the sandbox image.
+USER root
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash ca-certificates curl tar \
     && rm -rf /var/lib/apt/lists/*
