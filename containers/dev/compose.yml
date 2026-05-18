@@ -7,6 +7,7 @@ services:
       args:
         AGENT_SERVER_IMAGE: ${AGENT_SERVER_BASE_IMAGE:-ghcr.io/openhands/agent-server:1.22.1-python}
         CONTEXT_KING_VERSION: ${CONTEXT_KING_VERSION:-v1.8.3}
+        DOTNET_SDK_CHANNELS: ${DOTNET_SDK_CHANNELS:-8.0 9.0 10.0}
     image: ${AGENT_SERVER_IMAGE_REPOSITORY:-openhands-agent-server-ck}:${AGENT_SERVER_IMAGE_TAG:-local}
     command: ["bash", "-lc", "ck --version"]
 

@@ -3,14 +3,14 @@ FROM ${AGENT_SERVER_IMAGE}
 
 ARG TARGETARCH
 ARG CONTEXT_KING_VERSION=v1.8.3
-ARG DOTNET_CHANNEL=10.0
+ARG DOTNET_SDK_CHANNELS="8.0 9.0 10.0"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CK_HOME=/root/.ck
 ENV CK_MODEL_DIR=/root/.ck/models/bge-small-en-v1.5
 
-# Context King Linux binaries are framework-dependent apphosts, so install
-# a matching .NET runtime in the sandbox image.
+# Context King Linux binaries are framework-dependent apphosts. Install
+# side-by-side SDKs so the sandbox can build and test net8/net9/net10 projects.
 USER root
 
 RUN apt-get update \
@@ -19,7 +19,9 @@ RUN apt-get update \
 
 RUN set -eux; \
     curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh; \
-    bash /tmp/dotnet-install.sh --channel "${DOTNET_CHANNEL}" --runtime dotnet --install-dir /usr/share/dotnet; \
+    for channel in ${DOTNET_SDK_CHANNELS}; do \
+      bash /tmp/dotnet-install.sh --channel "${channel}" --quality ga --install-dir /usr/share/dotnet; \
+    done; \
     ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet; \
     rm -f /tmp/dotnet-install.sh
 
@@ -54,4 +56,10 @@ RUN set -eux; \
     ln -sf "${CK_HOME}/bin/ck" /usr/local/bin/ck; \
     rm -f /tmp/context-king.tar.gz
 
-RUN ck --version && dotnet --info > /dev/null
+RUN set -eux; \
+    ck --version; \
+    dotnet --list-sdks; \
+    dotnet --list-runtimes; \
+    dotnet --list-sdks | grep -E '^8\.'; \
+    dotnet --list-sdks | grep -E '^9\.'; \
+    dotnet --list-sdks | grep -E '^10\.'
