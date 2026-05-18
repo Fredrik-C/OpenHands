@@ -51,6 +51,18 @@ vi.mock("#/hooks/query/use-active-conversation", () => ({
   }),
 }));
 
+const mockWorkflowSettings = {
+  enabled: false,
+};
+
+vi.mock("#/hooks/query/use-settings", () => ({
+  useSettings: () => ({
+    data: {
+      workflow_settings: mockWorkflowSettings,
+    },
+  }),
+}));
+
 function makeStartTask(overrides: Record<string, unknown> = {}) {
   return {
     id: "task-789",
@@ -86,6 +98,7 @@ describe("useNewConversationCommand", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkflowSettings.enabled = false;
     queryClient = new QueryClient({
       defaultOptions: { mutations: { retry: false } },
     });
@@ -145,6 +158,8 @@ describe("useNewConversationCommand", () => {
         undefined,
         undefined,
         undefined,
+        undefined, // workflow_phase
+        undefined, // workflow_iteration
         undefined, // plugins
         "sandbox-456",
         "gpt-4o",
@@ -263,6 +278,8 @@ describe("useNewConversationCommand", () => {
         undefined, // trigger
         undefined, // parent_conversation_id is NOT set
         undefined, // agent_type
+        undefined, // workflow_phase
+        undefined, // workflow_iteration
         undefined, // plugins
         "sandbox-456", // sandbox_id IS set to reuse the sandbox
         "gpt-4o", // llm_model IS inherited from the original conversation
@@ -324,6 +341,8 @@ describe("useNewConversationCommand", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
+        undefined,
         "sandbox-456",
         undefined,
       );
@@ -350,6 +369,39 @@ describe("useNewConversationCommand", () => {
         expect.objectContaining({ id: "clear-conversation" }),
       );
       expect(mockToast.dismiss).toHaveBeenCalledWith("clear-conversation");
+    });
+  });
+
+  it("does not pass llm_model when workflow is enabled", async () => {
+    mockWorkflowSettings.enabled = true;
+    const readyTask = makeStartTask();
+    const createSpy = vi
+      .spyOn(V1ConversationService, "createConversation")
+      .mockResolvedValue(readyTask as never);
+    vi.spyOn(V1ConversationService, "getStartTask").mockResolvedValue(
+      readyTask as never,
+    );
+
+    const { result } = renderHook(() => useNewConversationCommand(), { wrapper });
+    await result.current.mutateAsync();
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "sandbox-456",
+        undefined,
+      );
     });
   });
 });

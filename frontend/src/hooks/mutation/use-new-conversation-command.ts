@@ -10,12 +10,14 @@ import {
   TOAST_OPTIONS,
 } from "#/utils/custom-toast-handlers";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
+import { useSettings } from "#/hooks/query/use-settings";
 
 export const useNewConversationCommand = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { data: conversation } = useActiveConversation();
+  const { data: settings } = useSettings();
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -29,6 +31,10 @@ export const useNewConversationCommand = () => {
       const v1Conversation = v1Conversations?.[0];
       const llmModel =
         v1Conversation?.agent_kind === "acp" ? null : v1Conversation?.llm_model;
+      const workflowEnabled = settings?.workflow_settings?.enabled ?? true;
+      const llmModelToPass = workflowEnabled
+        ? undefined
+        : (llmModel ?? undefined);
 
       // Start a new conversation reusing the existing sandbox directly.
       // We pass sandbox_id instead of parent_conversation_id so that the
@@ -48,7 +54,7 @@ export const useNewConversationCommand = () => {
         undefined, // workflow_iteration
         undefined, // plugins
         conversation.sandbox_id ?? undefined, // sandbox_id - reuse the same sandbox
-        llmModel ?? undefined, // llm_model - preserve the LLM model
+        llmModelToPass, // llm_model - preserve only when workflow is disabled
       );
 
       // Poll for the task to complete and get the new conversation ID

@@ -854,6 +854,24 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         if isinstance(workflow_settings, WorkflowSettings):
             return workflow_settings
         if isinstance(workflow_settings, dict):
+            # Backward-compatibility: older frontend defaults could persist a
+            # fully disabled/null workflow object. Treat that exact shape as
+            # "unset" so server workflow defaults still apply.
+            if (
+                workflow_settings.get('enabled') is False
+                and workflow_settings.get('plan_model') is None
+                and workflow_settings.get('implement_model') is None
+                and workflow_settings.get('review_model') is None
+                and workflow_settings.get('review_prompt') is None
+                and workflow_settings.get('strict_enforcement') is False
+                and workflow_settings.get('require_context_king') is True
+                and workflow_settings.get('max_review_iterations') == 3
+            ):
+                _logger.info(
+                    'Detected legacy workflow_settings payload; falling back '
+                    'to server workflow defaults.'
+                )
+                return WorkflowSettings()
             return WorkflowSettings.model_validate(workflow_settings)
         return WorkflowSettings()
 

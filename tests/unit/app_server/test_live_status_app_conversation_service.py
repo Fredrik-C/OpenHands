@@ -250,6 +250,24 @@ class TestLiveStatusAppConversationService:
         )
         assert resolved == 'explicit-model'
 
+    def test_get_workflow_settings_legacy_frontend_payload_falls_back_to_defaults(self):
+        self.mock_user.workflow_settings = {
+            'enabled': False,
+            'plan_model': None,
+            'implement_model': None,
+            'review_model': None,
+            'review_prompt': None,
+            'strict_enforcement': False,
+            'require_context_king': True,
+            'max_review_iterations': 3,
+        }
+
+        resolved = self.service._get_workflow_settings(self.mock_user)
+
+        assert resolved.enabled is True
+        assert resolved.plan_model == 'deepseek/deepseek-v4-pro'
+        assert resolved.implement_model == 'deepseek/deepseek-v4-flash'
+
     def test_validate_context_king_raises_when_required_and_missing(self):
         with patch(
             'openhands.app_server.app_conversation.live_status_app_conversation_service.shutil.which',

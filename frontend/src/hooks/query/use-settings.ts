@@ -51,6 +51,10 @@ const normalizeSettingsResponse = (settings: Partial<Settings>): Settings => {
       SettingsValue
     >),
   };
+  const workflowSettings = {
+    ...(DEFAULT_SETTINGS.workflow_settings ?? {}),
+    ...(settings.workflow_settings ?? {}),
+  };
 
   return {
     ...DEFAULT_SETTINGS,
@@ -105,6 +109,31 @@ const normalizeSettingsResponse = (settings: Partial<Settings>): Settings => {
     sandbox_grouping_strategy:
       settings.sandbox_grouping_strategy ??
       DEFAULT_SETTINGS.sandbox_grouping_strategy,
+    workflow_settings: {
+      enabled:
+        workflowSettings.enabled ?? DEFAULT_SETTINGS.workflow_settings!.enabled,
+      plan_model:
+        workflowSettings.plan_model ??
+        DEFAULT_SETTINGS.workflow_settings!.plan_model,
+      implement_model:
+        workflowSettings.implement_model ??
+        DEFAULT_SETTINGS.workflow_settings!.implement_model,
+      review_model:
+        workflowSettings.review_model ??
+        DEFAULT_SETTINGS.workflow_settings!.review_model,
+      review_prompt:
+        workflowSettings.review_prompt ??
+        DEFAULT_SETTINGS.workflow_settings!.review_prompt,
+      strict_enforcement:
+        workflowSettings.strict_enforcement ??
+        DEFAULT_SETTINGS.workflow_settings!.strict_enforcement,
+      require_context_king:
+        workflowSettings.require_context_king ??
+        DEFAULT_SETTINGS.workflow_settings!.require_context_king,
+      max_review_iterations:
+        workflowSettings.max_review_iterations ??
+        DEFAULT_SETTINGS.workflow_settings!.max_review_iterations,
+    },
   };
 };
 

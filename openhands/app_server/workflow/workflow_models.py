@@ -42,7 +42,7 @@ class WorkflowPhase(str, Enum):
 
 class WorkflowSettings(BaseModel):
     enabled: bool = True
-    plan_model: str | None = 'deepseek/deepseek-v4-pro'
+    plan_model: str | None = 'google/gemini-3.1-flash-lite-preview'
     implement_model: str | None = 'deepseek/deepseek-v4-flash'
     review_model: str | None = 'z-ai/glm-5.1'
     review_prompt: str | None = Field(default=DEFAULT_REVIEW_PROMPT)
